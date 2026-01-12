@@ -1,0 +1,14 @@
+/logs
+/doc
+/*.egg-info
+**/*.pyc
+__pycache__/
+**/.vscode
+**/.history
+**/build
+**/install
+**/log
+/*.png
+/wandb
+**/*.pdf
+**/*.csv
