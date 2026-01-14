@@ -34,7 +34,7 @@ class GO2JumpCfg( JumpCfg ):
         name = "go2"
         foot_name = "foot"
         penalize_contacts_on = ["thigh", "calf"]
-        terminate_after_contacts_on = ["base"]
+        terminate_after_contacts_on = ["base"] #相比go2_config只留下base，删除了calf
         self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
         hip_link_length_go2 = 0.0955
         thigh_link_length_go2 = 0.213

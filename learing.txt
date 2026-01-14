@@ -1,0 +1,227 @@
+cpg_jump-main/
+├── legged_gym/                         # [核心模块 1] 仿真环境与机器人定义
+│   ├── envs/
+│   │   ├── base/                       # 通用基础类，定义所有四足机器人的共性
+│   │   │   ├── base_task.py            # 任务基类，定义 step, reset 等标准接口
+│   │   │   ├── legged_robot.py         # 机器人基类：处理物理引擎交互、关节力矩计算、碰撞检测
+│   │   │   ├── legged_robot_config.py  # 机器人基类配置：默认的物理参数、奖励权重
+│   │   │   ├── jump_env.py             # [重点] 跳跃任务环境：实现 CPG+RL 分层控制逻辑
+│   │   │   └── jump_config.py          # 跳跃任务配置：定义跳跃高度、指令范围、奖励函数
+│   │   │
+│   │   └── go2/                        # Unitree Go2 机器人专用配置
+│   │       ├── go2_config.py           # 底层训练配置 (Low-level)：定义 CPG 参数、PD 增益、观察空间
+│   │       └── go2_jump.py             # 顶层训练配置 (High-level)：继承自 JumpCfg，针对 Go2 优化的跳跃参数
+│   │
+│   ├── scripts/                        # 运行脚本
+│   │   ├── train.py                    # 训练入口：python train.py --task=go2
+│   │   └── play.py                     # 推理/回放入口：python play.py --task=go2
+│   │
+│   └── utils/                          # 工具库
+│       ├── hopf_cpg.py                 # [核心数学] Hopf 振荡器实现：生成正弦波步态信号
+│       ├── task_registry.py            # 任务注册表：将环境配置(Env)与算法配置(PPO)绑定
+│       ├── terrain.py                  # 地形生成：平地、台阶、崎岖地形
+│       ├── logger.py                   # 日志记录工具
+│       └── isaacgym_utils.py           # Isaac Gym 物理引擎的辅助函数
+│
+├── rsl_rl/                             # [核心模块 2] 强化学习算法库 (PPO)
+│   ├── rsl_rl/
+│   │   ├── algorithms/                 # 算法实现
+│   │   │   └── ppo.py                  # PPO 算法核心：计算 Loss、Clip、梯度更新
+│   │   ├── modules/                    # 神经网络模型
+│   │   │   ├── actor_critic.py         # 定义策略网络(Actor)和价值网络(Critic)的 MLP 结构
+│   │   │   └── actor_critic_recurrent.py # LSTM/RNN 版本的网络定义
+│   │   ├── runners/                    # 训练流程控制器
+│   │   │   └── on_policy_runner.py     # 管理 Rollout -> Learn -> Log 的主循环
+│   │   └── storage/                    # 数据缓冲区，存储用于训练的 Transitions
+│   └── setup.py                        # 安装脚本
+│
+├── deploy/                             # [核心模块 3] Sim2Real 真机部署代码
+│   ├── src/                            # C++ 部署代码 (ROS 节点)
+│   │   └── deploy_rl_policy/
+│   │       ├── src/
+│   │       │   └── low_level_ctrl.cpp  # 底层控制器：接收 SDK 数据，调用 Policy，发送电机指令
+│   │       └── include/                # 头文件
+│   │
+│   ├── scripts/                        # Python 部署脚本与工具
+│   │   ├── deploy_rl_policy/
+│   │   │   ├── scripts/
+│   │   │   │   ├── cpg_rl.py           # 部署时的 CPG 类，对应训练时的 hopf_cpg.py
+│   │   │   │   ├── rl_policy.py        # 加载 .pt 模型并进行推理
+│   │   │   │   ├── xbox_command.py     # 处理手柄输入
+│   │   │   │   └── plot/               # 数据绘图工具 (绘制步态曲线、跳跃高度等)
+│   │   │   └── configs/                # 部署配置文件 (go2.yaml)
+│   │   └── resources/
+│   │       └── policies/               # [重要] 存放训练好的模型文件 (.pt)
+│   └── README.md                       # 部署说明文档
+│
+└── resources/                          # 机器人资产文件
+    └── robots/go2/
+        ├── urdf/                       # 机器人的物理描述文件 (URDF)
+        └── dae/                        # 机器人的 3D 网格模型 (用于可视化)
+
+        第一阶段：看配置与入口 (建立全局观)
+
+先弄清楚“我们要训练个什么东西”以及“怎么让它跑起来”。
+
+    legged_gym/envs/go2/go2_config.py (及 go2_jump.py)
+
+        作用：项目的“说明书”。定义了机器人的物理属性、初始姿态、控制频率等。
+
+        重点关注：
+
+            class control: 这里的 control_type = 'CPG_OFFSETX' 和 stiffness/damping 决定了底层的控制刚度，非常关键。
+
+            class init_state: 机器人一开始是怎么站的。
+
+            class rewards: 看了这个就知道这次训练想让狗干嘛（比如 tracking_lin_vel 权重高就是练走路，jump_goal 权重高就是练跳跃）。
+
+    legged_gym/scripts/train.py
+
+        作用：程序的启动入口。
+
+        重点关注：看它如何解析参数，如何调用 task_registry.make_env 创建环境，以及如何初始化 OnPolicyRunner。这能帮你理清程序启动的脉络。
+
+第二阶段：核心环境逻辑 (数据交互枢纽)
+
+这是最重要的一块。所有的物理交互、奖励计算、观测生成都在这里。
+
+    legged_gym/envs/base/legged_robot.py
+
+        作用：机器人的“躯体”和“感官”。
+
+        阅读顺序：
+
+            step(self, actions): 总控函数。看它如何接收 RL 的 actions，处理后推给物理引擎 gym.simulate。
+
+            _compute_torques(self, actions): （极重要） 这里不仅是计算力矩，更是 RL 与 CPG 的结合点。你会看到它调用了 self._cpg.get_CPG_RL_actions。
+
+            compute_observations(self): 看看策略网络到底“看到”了什么数据（注意里面的 jump_sig 和 CPG 状态）。
+
+            _reward_jump_sig(self) 等奖励函数：这是 Sim2Sim 效果的关键，特别是跳跃状态机的逻辑，非常值得细读。
+
+第三阶段：CPG 控制算法 (项目的灵魂)
+
+这是本项目区别于普通 End-to-End RL 的核心特色。
+
+    legged_gym/utils/cpg_rl.py
+
+        作用：数学层面的核心。负责产生周期性步态信号。
+
+        重点关注：
+
+            get_CPG_RL_actions(...): 看它如何把 RL 输出的 16 维向量拆解成 CPG 的幅值 μ、频率 ω、偏移量 offset 等。
+
+            integrate_oscillator_equations(...): 這是 CPG 的心脏，通过微分方程迭代计算下一时刻的相位和幅值。
+
+            compute_inverse_kinematics(...): 简单的几何逆运动学，把足端位置反解为关节角度。
+
+第四阶段：强化学习算法 (策略的大脑)
+
+最后看看网络是怎么长出来的，以及怎么更新的。
+
+    rsl_rl/rsl_rl/modules/actor_critic.py
+
+        作用：定义神经网络结构。
+
+        重点关注：你会发现它只是简单的 MLP（多层感知机），这说明复杂的步态主要靠 CPG 的数学结构支撑，RL 甚至不需要用 LSTM/GRU 这种复杂网络就能学会。
+
+    rsl_rl/rsl_rl/algorithms/ppo.py
+
+        作用：PPO 算法的实现。
+
+        建议：如果你熟悉 PPO，扫一眼即可，这里没有太多针对机器人的魔改，是比较标准的实现。第一阶段：看配置与入口 (建立全局观)
+
+
+
+学习路径概览
+
+    宏观视角：deploy/README.md (必读，了解操作指令)
+
+    环境搭建 (Sim)：deploy/src/deploy_rl_policy/scripts/mujoco_simulator.py (理解仿真器如何模拟真机)
+
+    核心大脑 (Policy)：deploy/src/deploy_rl_policy/scripts/rl_policy.py (最核心的节点，加载模型并推理)
+
+    算法内核 (CPG)：deploy/src/deploy_rl_policy/scripts/cpg_rl.py (理解步态生成器如何与 RL 结合)
+
+    交互与配置：xbox_command.py (手柄输入) & go2.yaml (系统参数)
+
+详细代码导读 (按学习顺序)
+第一步：环境搭建与仿真环 (The Simulator)
+
+文件名: deploy/src/deploy_rl_policy/scripts/mujoco_simulator.py
+
+这是 Sim2Sim 的入口。它的作用是模拟真实的 Go2 硬件接口，让你的 RL 策略以为自己控制的是真机。
+
+    核心逻辑：
+
+        加载 Go2 的 MJCF (MuJoCo XML) 模型。
+
+        ROS 接口模拟：它会启动一个 ROS 节点，订阅 电机指令 (LowCmd)，并 发布 传感器数据 (LowState, IMU)。
+
+        Sim2Real 的关键：注意观察它如何处理 p_gains (刚度) 和 d_gains (阻尼)。在 Sim2Sim 中，这部分必须与 RL 训练时的配置（legged_robot_config.py）严格一致，否则策略会抖动。
+
+    你需要搞清的：
+
+        它发布了哪些 Topic？(通常是 /low_state 或类似名称)
+
+        它订阅了什么 Topic？(通常是 /low_cmd)
+
+第二步：策略部署节点 (The Brain)
+
+文件名: deploy/src/deploy_rl_policy/scripts/rl_policy.py
+
+这是整个部署系统的指挥官。无论在 MuJoCo 仿真里，还是在真实 Go2 身上，运行的都是这个文件。
+
+    核心逻辑：
+
+        加载模型：读取 deploy/resources/policies/ 下的 .pt 文件 (TorchScript)。
+
+        状态观测 (Observation)：将来自 ROS 的传感器数据（关节角、IMU 欧拉角等）打包成 tensor，这必须严格对应你训练代码中 compute_observations 的顺序。
+
+        CPG 融合：它会调用 CPG 模块计算基础步态，然后将 RL 的输出叠加在上面（action_scale * action + cpg_output）。
+
+    你需要搞清的：
+
+        找到 get_obs() 函数：看它是如何把 ROS 消息拼成 1x68 (或相关维度) 的向量的。
+
+        找到 step() 循环：看它控制频率是多少（通常 deploy 频率要比 sim 频率低，比如 50Hz 或 100Hz）。
+
+第三步：CPG 算法实现 (The Math)
+
+文件名: deploy/src/deploy_rl_policy/scripts/cpg_rl.py
+
+Go2 的这个项目不仅是纯 RL，还结合了 CPG（中心模式发生器）。
+
+    核心逻辑：
+
+        实现了 Hopf 振荡器方程。
+
+        接口：RL 策略网络会输出参数来改变 CPG 的 mu (幅值) 或 omega (频率)，从而动态调整步态。
+
+    学习重点：
+
+        关注 update() 函数，看它如何根据 RL 的 action 更新振荡器状态，并输出关节的目标位置 x, z。
+
+第四步：指令输入 (The Input)
+
+文件名: deploy/src/deploy_rl_policy/scripts/xbox_command.py
+
+为了能控制机器人走动，你需要一个输入源。
+
+    核心逻辑：
+
+        读取 Xbox 手柄数据（或键盘）。
+
+        将摇杆值映射为机器人的目标速度 (lin_vel_x, lin_vel_y, ang_vel_yaw)。
+
+        发布：将这些指令发布到 ROS 话题，供 rl_policy.py 订阅。
+
+第五步：参数配置 (The Config)
+
+文件名: deploy/src/deploy_rl_policy/configs/go2.yaml
+
+    核心逻辑：
+
+        定义了所有关键参数：PID 增益、动作缩放比例 (action_scale)、控制频率 (dt)。
+
+    避坑指南：Sim2Real 失败的 80% 原因都在这里。如果你在 legged_robot_config.py 改了 stiffness，但忘记在这个 yaml 里同步修改，机器人就会瘫痪或抽搐。

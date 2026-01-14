@@ -22,12 +22,12 @@ class GO2RoughCfg( LeggedRobotCfg ):
 
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
-        control_type = 'CPG_OFFSETX'
+        control_type = 'CPG_OFFSETX'  #自定义CPG-RL控制               
         stiffness = {'joint': 50.}  # [N*m/rad]
         damping = {'joint': 1}     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         # decimation: Number of control action updates @ sim DT per policy DT
-        decimation = 10
+        decimation = 10 #仿真频率与控制频率比值，神经网络每10次物理步才输出一次动作
 
     class asset( LeggedRobotCfg.asset ):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/go2/urdf/go2.urdf'

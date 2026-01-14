@@ -5,22 +5,31 @@ from rclpy.node import Node
 import mujoco.viewer
 import mujoco
 import numpy as np
+#导入 Unitree 官方定义的 ROS 消息格式
 from unitree_go.msg import LowState,LowCmd
 from pathlib import Path
 from std_msgs.msg import Float32MultiArray,Float32
 import threading
 import time
+# 自动定位项目根目录，以便找到 go2.xml 模型文件
 project_root=Path(__file__).parents[4]
 class MujocoSimulator(Node):
     def __init__(self):
         super().__init__("mujoco_simulator_node")
+
+        # --- 核心通信接口 ---
+        # 1. 发布机器人状态 (模仿真机底层驱动)
+        # Topic: /mujoco/lowstate (包含关节角、IMU、速度等)
         self.low_state_puber=self.create_publisher(LowState,"/mujoco/lowstate",10)
+        # 2. 调试用 Topic (可视化高度、速度、力)
         self.height_pub=self.create_publisher(Float32,"/mujoco/height",10)
         self.vel_pub=self.create_publisher(Float32MultiArray,"/mujoco/vel",10)
         self.force_pub=self.create_publisher(Float32MultiArray,"/mujoco/force",10)
         self.torque_pub=self.create_publisher(Float32MultiArray,"/mujoco/torque",10)
+        # 3. 接收控制指令 (模仿真机接收底层指令)
+        # Topic: /mujoco/lowcmd (RL 策略发出的动作)
         self.target_torque_suber=self.create_subscription(LowCmd,"/mujoco/lowcmd",self.target_torque_callback,10)
-
+        
         self.step_counter = 0
         self.xml_path=project_root/"resources"/"go2"/"go2.xml"
         # Initialize Mujoco

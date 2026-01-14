@@ -2,7 +2,7 @@ from .base_config import BaseConfig
 
 class JumpCfg(BaseConfig):
     class env:
-        num_envs = 2048
+        num_envs = 10240 #2048
         num_single_obs = 35
         frame_stack = 4 # number of frames stacked in the observation buffer
         num_observations = num_single_obs 
@@ -226,7 +226,7 @@ class JumpCfgPPO(BaseConfig):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 5 # per iteration
-        max_iterations = 3000 # number of policy updates
+        max_iterations = 2000 # number of policy updates
 
         wandb_project = "cpg_rl"       # 项目名称 (必须有)
         wandb_entity = None            # 用户名 (可选，填 None 即可)

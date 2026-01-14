@@ -7,10 +7,10 @@ class LeggedRobotCfg(BaseConfig):
         frame_stack = 4 # number of frames stacked in the observation buffer
         num_observations = num_single_obs  # total number of observations per env
         num_privileged_obs = 76 # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
-        num_actions = 16
+        num_actions = 16 #网络输出的控制信号维度
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
-        episode_length_s = 20 # episode length in seconds
+        episode_length_s = 20 # episode length in seconds  #每个训练回合最多20s
         test = False
 
     class terrain:
@@ -92,13 +92,13 @@ class LeggedRobotCfg(BaseConfig):
         curriculum = False
         max_curriculum = 3.
         max_jump_up_height = 0.6 # [m]
-        num_commands = 5 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, target_phase[1:]
-        resampling_time = 10. # time before command are changed[s]
+        num_commands = 5 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, target_phase[1:] #5维的控制指令
+        resampling_time = 10. # time before command are changed[s] #每10秒改变一次目标指令
         heading_command = False # if true: compute ang vel command from heading error
         freq_max= 31.4
         freq_low= -3.14
         is_jump=1
-        class ranges:
+        class ranges: #指令数据的范围
             lin_vel_x = [0, 1.0] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-1e-5, 1e-5]    # min max [rad/s]
@@ -150,7 +150,7 @@ class LeggedRobotCfg(BaseConfig):
         min_mode_steps = 100    # 模式最小保持步数
         cooldown_steps = 150
 
-    class normalization:
+    class normalization: #归一化参数处理
         class obs_scales:
             lin_vel = 2.0
             ang_vel = 0.25
@@ -158,7 +158,7 @@ class LeggedRobotCfg(BaseConfig):
             dof_vel = 0.05
             height_measurements = 5.0
         clip_observations = 100.
-        clip_actions = 100.
+        clip_actions = 100.  #截断，防止异常值损坏梯度
 
     class noise:
         add_noise = False #True
@@ -178,12 +178,12 @@ class LeggedRobotCfg(BaseConfig):
         lookat = [11., 5, 3.]  # [m]
 
     class sim:
-        dt =  0.001
+        dt =  0.001 #仿真的物理步长，计算频率1000hz
         substeps = 1
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z
 
-        class physx:
+        class physx: #NVIDIA PhysX 引擎的具体参数（线程数、求解器类型等）
             num_threads = 10
             solver_type = 1  # 0: pgs, 1: tgs
             num_position_iterations = 4
@@ -215,7 +215,7 @@ class LeggedRobotCfgPPO(BaseConfig):
         use_clipped_value_loss = True
         clip_param = 0.2
         entropy_coef = 0.01
-        num_learning_epochs = 5
+        num_learning_epochs = 5 
         learning_rate = 1.e-3 #5.e-4
         schedule = 'adaptive' # could be adaptive, fixed
         gamma = 0.99
