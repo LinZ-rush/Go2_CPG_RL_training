@@ -37,6 +37,7 @@ from torch.nn.modules import rnn
 
 class ActorCritic(nn.Module):
     is_recurrent = False
+    #在 __init__ 中用 MLP（多层感知机）分别搭建 Actor 和 Critic。
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_actions,
@@ -55,12 +56,17 @@ class ActorCritic(nn.Module):
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
 
-        # Policy
+        # --- 1. 构建 Policy (Actor) 网络 ---
+        # 这是一个简单的 MLP：Linear -> Activation -> Linear -> ... -> Linear
         actor_layers = []
+        # 输入层
         actor_layers.append(nn.Linear(mlp_input_dim_a, actor_hidden_dims[0]))
         actor_layers.append(activation)
+        # 隐藏层循环
         for l in range(len(actor_hidden_dims)):
             if l == len(actor_hidden_dims) - 1:
+                # 输出层：直接输出动作的【均值 (Mean)】
+                # 注意：这里没有接 Tanh 或 Sigmoid，输出是无界的实数。
                 actor_layers.append(nn.Linear(actor_hidden_dims[l], num_actions))
                 print("experiment_name: ", experiment_name)
                 # if experiment_name == 'rough_go2_high_level':
@@ -71,12 +77,14 @@ class ActorCritic(nn.Module):
                 actor_layers.append(activation)
         self.actor = nn.Sequential(*actor_layers)
 
-        # Value function
+        # --- 2. 构建 Value (Critic) 网络 ---
+        # 结构类似 Actor，但输入维度可能是特权观测维度
         critic_layers = []
         critic_layers.append(nn.Linear(mlp_input_dim_c, critic_hidden_dims[0]))
         critic_layers.append(activation)
         for l in range(len(critic_hidden_dims)):
             if l == len(critic_hidden_dims) - 1:
+                # 输出层：输出 1 个标量 (Scalar)，即状态价值 V(s)
                 critic_layers.append(nn.Linear(critic_hidden_dims[l], 1))
             else:
                 critic_layers.append(nn.Linear(critic_hidden_dims[l], critic_hidden_dims[l + 1]))
