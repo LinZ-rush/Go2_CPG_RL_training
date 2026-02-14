@@ -2,7 +2,7 @@ from .base_config import BaseConfig
 
 class LeggedRobotCfg(BaseConfig):
     class env:
-        num_envs = 4096 #4096
+        num_envs = 8192 #4096
         num_single_obs = 68
         frame_stack = 4 # number of frames stacked in the observation buffer
         num_observations = num_single_obs  # total number of observations per env
@@ -226,8 +226,8 @@ class LeggedRobotCfgPPO(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 24 # per iteration
-        max_iterations = 3000 #30000 # number of policy updates
+        num_steps_per_env = 48 #24 # per iteration
+        max_iterations = 10000 #30000 # number of policy updates
 
         # logging
         save_interval = 500 # check for potential saves every this many iterations

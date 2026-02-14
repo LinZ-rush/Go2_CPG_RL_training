@@ -113,3 +113,10 @@ If your policy requires the base velocity as part of the observation and it's no
 
 It's implemented as an **Extended Kalman Filter (EKF)** with a measurement model and a system model. The measurement is computed from kinematic equations using [Pinocchio](https://github.com/stack-of-tasks/pinocchio). Here's a rough overview of the theory behind it:
 [https://glowing-torch.github.io/Deploy-an-RL-policy-on-the-Unitree-Go2-robot/](https://glowing-torch.github.io/Deploy-an-RL-policy-on-the-Unitree-Go2-robot/).
+
+
+#本项目的source路径
+ source /opt/ros/humble/setup.zsh
+ source ~/Repo/cpg_jump-main/deploy/src/unitree_ros2/install/setup.zsh
+ source ~/Repo/cpg_jump-main/deploy/install/setup.zsh
+

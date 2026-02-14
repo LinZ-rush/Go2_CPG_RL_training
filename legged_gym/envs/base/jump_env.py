@@ -22,7 +22,7 @@ from .jump_config import JumpCfg
 
 #policy_path = os.path.join(LEGGED_GYM_ROOT_DIR, "logs/rough_go2_low_level/exported/policies/low_level_policy.pt")
 #policy = torch.jit.load(policy_path).to("cuda:0")
-policy_path = os.path.join(LEGGED_GYM_ROOT_DIR, "logs/rough_go2_low_level/exported/policies/policy_low_level.pt")
+policy_path = os.path.join(LEGGED_GYM_ROOT_DIR, "logs/rough_go2_low_level/exported/policies/policy_1_Jan28.pt")
 policy = torch.jit.load(policy_path).to("cuda:0")
 
 
@@ -215,7 +215,7 @@ class JumpEnv(BaseTask):
             self.episode_sums["termination"] += rew
     
     
-    def compute_observations(self):
+    def compute_observations(self): #上层输入35维度
         """ Computes observations
         """
         phase = self._cpg.X[:, 1, :] 
@@ -243,41 +243,85 @@ class JumpEnv(BaseTask):
         # obs_buf_all = torch.stack([self.obs_history[i]
         #                            for i in range(self.obs_history.maxlen)], dim=1)  # N,T,K
         # self.obs_buf = obs_buf_all.reshape(self.num_envs, -1)  # N, T*K
+    
+
+    # def compute_low_level_observations(self,high_actions):
+    #     self.low_level_obs_buf = torch.cat((  
+    #                                 # self.base_lin_vel * self.obs_scales.lin_vel,  # base linear velocity
+    #                                 self.base_ang_vel * self.obs_scales.ang_vel,  # base angular velocity
+    #                                 self.projected_gravity,  # projected gravity
+    #                                 self.commands[:,:3] * self.commands_scale,  # commands (x vel, y vel, yaw vel)
+    #                                 high_actions, 
+    #                                 (self.dof_pos-self.default_dof_pos) * self.obs_scales.dof_pos,  # DOF positions (normalized)
+    #                                 self.dof_vel*self.obs_scales.dof_vel,  # DOF velocities (normalized)
+    #                                 self.low_actions,  # last actions
+    #                                 # self.contact,
+    #                                (self._cpg.X[:,0,:] - ((self._cpg.mu_up[0]+ self._cpg.mu_low[0]) / 2)) * self.obs_scales.dof_pos,
+    #                                 (self._cpg.X[:,1,:] - np.pi) * 1/np.pi,
+    #                                 self._cpg.X_dot[:,0,:] * 1/30, 
+    #                                 (self._cpg.X_dot[:,1,:] - 15) * 1/30,
+    #                                 ),dim=-1)
+    #     # clip_obs = self.cfg.normalization.clip_observations
+    #     # self.low_level_obs_buf = torch.clip(self.low_level_obs_buf, -clip_obs, clip_obs)
+    #     # self.low_level_obs_history.append(self.low_level_obs_buf)
+    #     # low_level_obs_buf_all = torch.stack([self.low_level_obs_history[i] 
+    #     #                                      for i in range(self.low_level_obs_history.maxlen)], dim=1)  # N,T,K
+    #     # self.low_level_obs_buf = low_level_obs_buf_all.reshape(self.num_envs, -1)  # N, T*K
+
     def compute_low_level_observations(self, high_actions):
-        # ----------------------------------------------------------------------
-        # 1. 准备 High Level 指令 (3维 -> 3个特征)
-        # ----------------------------------------------------------------------
-        # 映射 High Policy 输出到 [高度, 信号, 步态]
-        jump_height_cmd = (high_actions[:, 0:1] * 0.4 + 0.2)   # 范围 0.2~0.6m
-        jump_signal_cmd = (high_actions[:, 1:2] > 0.0).float() # >0 触发
-        gait_id_cmd = torch.zeros_like(jump_height_cmd)        # 默认 Trot (0)
+        # --- 1. 语义映射 (Mapping High-Level [0,1] to Low-Level Physics) ---
         
-        # ----------------------------------------------------------------------
-        # 2. 拼接观测向量 (Total: 68)
-        # ----------------------------------------------------------------------
+        # [Action 0]: 跳跃高度映射
+        # legged_robot 训练范围是 [0.45, 0.6] (见 config commands.ranges)
+        # 我们稍微放宽一点范围以增加鲁棒性，比如 [0.3, 0.6]
+        jump_height_cmd = high_actions[:, 0:1] * 0.3 + 0.3 
+
+        # [Action 1]: 步态 ID 映射
+        # High-level 输出 0~1 -> 映射到 0, 1, 2, 3
+        # 乘以 3.99 并向下取整，可以均匀覆盖 0,1,2,3
+        gait_cmd = torch.floor(high_actions[:, 1:2] * 3.99)
+
+        # [Action 2]: 跳跃信号映射
+        # High-level 输出 0~1 -> 映射到 0 或 1
+        jump_signal_cmd = (high_actions[:, 2:3] > 0.5).float()
+
+        # --- 2. 观测拼接 (严格对齐 legged_robot.py) ---
         self.low_level_obs_buf = torch.cat((  
-            self.base_ang_vel * self.obs_scales.ang_vel,       # 3
-            self.projected_gravity,                            # 3
-            self.commands[:, :3] * self.commands_scale,        # 3
-            
-            # --- High Level 指令 (3) ---
-            jump_height_cmd,                                   # 1
-            jump_signal_cmd,                                   # 1
-            gait_id_cmd,                                       # 1
-            
-            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos, # 12
-            self.dof_vel * self.obs_scales.dof_vel,                          # 12
-            
-            # --- Previous Actions (16) ---
-            self.low_actions,                                  # 16 
-            
-            # --- CPG (16) ---
-            (self._cpg.X[:, 0, :] - ((self._cpg.mu_up[0] + self._cpg.mu_low[0]) / 2)) * self.obs_scales.dof_pos, # 8
+            # 1. Base Ang Vel (3)
+            self.base_ang_vel * self.obs_scales.ang_vel,
+
+            # 2. Projected Gravity (3)
+            self.projected_gravity,
+
+            # 3. Commands (3)
+            self.commands[:, :3] * self.commands_scale,
+
+            # 4. [映射后的] Jump Height (1)
+            jump_height_cmd,
+
+            # 5. [映射后的] Gait Command (1)
+            gait_cmd,
+
+            # 6. [映射后的] Jump Signal (1)
+            jump_signal_cmd,
+
+            # 7. DOF Pos (12)
+            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+
+            # 8. DOF Vel (12)
+            self.dof_vel * self.obs_scales.dof_vel,
+
+            # 9. Low Actions (16) 
+            # 确保你在 _init_buffers 里已经改成了 16！
+            self.low_actions,
+
+            # 10. CPG State (8)
+            (self._cpg.X[:, 0, :] - ((self._cpg.mu_up[0] + self._cpg.mu_low[0]) / 2)) * self.obs_scales.dof_pos,
             (self._cpg.X[:, 1, :] - np.pi) * 1 / np.pi,
-            
-            self._cpg.X_dot[:, 0, :] * 1 / 30,                                                                   # 8
+
+            # 11. CPG Velocity (8)
+            self._cpg.X_dot[:, 0, :] * 1 / 30,
             (self._cpg.X_dot[:, 1, :] - 15) * 1 / 30,
-            
         ), dim=-1)
 
     def create_sim(self):

@@ -1,4 +1,7 @@
 policy_path: "../../../../resources/policies/policy_1.pt"
+#policy_path: "../../../../resources/policies/policy_max_height.pt"
+#policy_path: "../../../../resources/policies/policy_higher.pt"
+#policy_path: "/home/tumi6/Repo/cpg_jump-main/deploy/resources/policies/policy_1_Jan28.pt"
 default_angles: [0.1,0.8,-1.5,-0.1,0.8,-1.5,0.1,1.0,-1.5,-0.1,1,-1.5]
 lin_vel_scale: 2.0
 ang_vel_scale: 0.25

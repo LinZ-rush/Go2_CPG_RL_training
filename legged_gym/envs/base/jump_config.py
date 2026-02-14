@@ -2,11 +2,11 @@ from .base_config import BaseConfig
 
 class JumpCfg(BaseConfig):
     class env:
-        num_envs = 10240 #2048
+        num_envs = 8192 #2048
         num_single_obs = 35
         frame_stack = 4 # number of frames stacked in the observation buffer
         num_observations = num_single_obs 
-        num_low_level_observations = 74
+        num_low_level_observations = 68
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_actions = 3
         env_spacing = 3.  # not used with heightfields/trimeshes 
@@ -225,8 +225,8 @@ class JumpCfgPPO(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 5 # per iteration
-        max_iterations = 2000 # number of policy updates
+        num_steps_per_env = 12 # per iteration
+        max_iterations = 3000 # number of policy updates
 
         wandb_project = "cpg_rl"       # 项目名称 (必须有)
         wandb_entity = None            # 用户名 (可选，填 None 即可)
