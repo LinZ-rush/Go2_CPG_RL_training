@@ -115,7 +115,7 @@ class CPG_RL():
                             [ 0, 1, 0, 1 ]],dtype=torch.float, device=device, requires_grad=False)
         trot = np.pi * trot
 
-        self.PHI_trot = trot * np.pi
+        self.PHI_trot = trot  # 已乘过π，不重复乘（原代码多乘一次导致目标相位差≈3.59rad而非π）
         self.PHI_walk = walk * np.pi
         self.PHI_bound = bound*np.pi
         self.PHI_pace = pace * np.pi
@@ -211,7 +211,11 @@ class CPG_RL():
             d2X = (_a * ( _a/4 * (torch.sqrt(self._mu) - X[:,0,:]) - X_dot_prev[:,0,:] )).unsqueeze(1)
             if self._couple:
                 for i in range(4):
-                    self._omega_residuals[:,i] += torch.sum(   X[:,0,:] * self._coupling_strength * torch.sin(X[:,1,:] - torch.remainder(self.X[:,1,i], (2*np.pi)) - self.PHI[i,:] ) ,2 )
+                    theta_i = torch.remainder(self.X[:,1,i], 2*np.pi).unsqueeze(1)  # [num_envs,1]，避免广播错误
+                    self._omega_residuals[:,i] += torch.sum(
+                        X[:,0,:] * self._coupling_strength * torch.sin(X[:,1,:] - theta_i - self.PHI[i,:]),
+                        dim=-1  # 对4条腿求和→[num_envs]，原dim=2在2D tensor上会报IndexError
+                    )
             X_dot[:,0,:] = X_dot_prev[:,0,:] + (d2X_prev[:,0,:] + d2X[:,0,:]) * dt / 2
             X_dot[:,1,:] = self._omega_residuals
             self.X = X + (X_dot_prev + X_dot) * dt / 2 

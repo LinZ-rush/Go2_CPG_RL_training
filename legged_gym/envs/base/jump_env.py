@@ -72,8 +72,8 @@ class JumpEnv(BaseTask):
                 clip_low_actions = self.cfg.normalization.clip_low_level_actions
                 self.low_actions = torch.clip(self.low_actions, -clip_low_actions, clip_low_actions).to(self.device)
             for _ in range(self.cfg.control.low_decimation): #10
-                low_actions_scaled = self.low_actions * self.cfg.control.action_scale
-                self.torques = self._compute_torques(low_actions_scaled).view(self.torques.shape)
+                # 注意：_compute_torques内部已经乘了action_scale，这里不能重复缩放！
+                self.torques = self._compute_torques(self.low_actions).view(self.torques.shape)
                 self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
                 self.gym.simulate(self.sim)
                 if self.cfg.env.test:
@@ -269,21 +269,35 @@ class JumpEnv(BaseTask):
     #     # self.low_level_obs_buf = low_level_obs_buf_all.reshape(self.num_envs, -1)  # N, T*K
 
     def compute_low_level_observations(self, high_actions):
+        """
+        将High-Level的3维输出映射为Low-Level的68维观测
+
+        NEW OUTPUT SEMANTICS:
+        high_actions[:, 0]: 步态ID比例 (0-1) → {0,1,2,3}
+        high_actions[:, 1]: 跳跃可行性评分 (0-1)
+        high_actions[:, 2]: 跳跃高度比例 (0-1) → [0.3, 0.6]m
+        """
         # --- 1. 语义映射 (Mapping High-Level [0,1] to Low-Level Physics) ---
-        
-        # [Action 0]: 跳跃高度映射
-        # legged_robot 训练范围是 [0.45, 0.6] (见 config commands.ranges)
-        # 我们稍微放宽一点范围以增加鲁棒性，比如 [0.3, 0.6]
-        jump_height_cmd = high_actions[:, 0:1] * 0.3 + 0.3 
 
-        # [Action 1]: 步态 ID 映射
-        # High-level 输出 0~1 -> 映射到 0, 1, 2, 3
+        # [Action 0]: 步态 ID 映射 (NEW: 从第0维获取)
+        # High-level 输出 0~1 -> 映射到 {0, 1, 2, 3}
         # 乘以 3.99 并向下取整，可以均匀覆盖 0,1,2,3
-        gait_cmd = torch.floor(high_actions[:, 1:2] * 3.99)
+        gait_cmd = torch.floor(high_actions[:, 0:1] * 3.99)
 
-        # [Action 2]: 跳跃信号映射
-        # High-level 输出 0~1 -> 映射到 0 或 1
-        jump_signal_cmd = (high_actions[:, 2:3] > 0.5).float()
+        # [Action 1]: 跳跃可行性 → 跳跃信号 (NEW: 训练时模拟手柄请求)
+        # 训练时：随机生成跳跃请求，模拟手柄按键
+        jump_request = (torch.rand(self.num_envs, 1, device=self.device) < 0.1).float()
+
+        # 网络的可行性评分
+        jump_feasibility = high_actions[:, 1:2]  # [0, 1]
+
+        # 最终跳跃信号 = 请求 AND 可行性高
+        # 这样网络会学习：只有在条件满足时才输出高可行性评分
+        jump_signal_cmd = (jump_request * (jump_feasibility > 0.7)).float()
+
+        # [Action 2]: 跳跃高度映射 (NEW: 从第2维获取)
+        # 网络根据速度自适应调整高度 [0.3, 0.6]m
+        jump_height_cmd = high_actions[:, 2:3] * 0.3 + 0.3
 
         # --- 2. 观测拼接 (严格对齐 legged_robot.py) ---
         self.low_level_obs_buf = torch.cat((  
@@ -957,4 +971,163 @@ class JumpEnv(BaseTask):
         # print("jump_distance_error", jump_distance_error)
         # print("just_landed count", just_landed.sum().item())
         reward = torch.where(just_landed, reward_jump, torch.zeros_like(reward_jump))
+        return reward
+
+    def _reward_gait_velocity_matching(self):
+        """
+        奖励网络根据速度选择合适的步态（严格对齐 GAIT_TEMPLATES ID）
+
+        GAIT_TEMPLATES 定义 (legged_robot.py):
+        - ID 0: TROT  [0.0, 0.5, 0.5, 0.0]  → 中速最优
+        - ID 1: WALK  [0, 0.5, 0.75, 0.25]   → 低速最优
+        - ID 2: BOUND [0.0, 0.0, 0.5, 0.5]   → 高速最优
+        - ID 3: PRONK [0.0, 0.0, 0.0, 0.0]   → 跳跃专用（不参与速度匹配）
+
+        步态-速度映射:
+        - Walk (ID=1):  速度 < 0.5 m/s
+        - Trot (ID=0):  0.5 ≤ 速度 < 1.5 m/s
+        - Bound (ID=2): 速度 ≥ 1.5 m/s
+        """
+        # 获取当前速度（水平方向）
+        current_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)  # [num_envs]
+
+        # High-Level输出的步态（sigmoid后的[0,1]）
+        gait_output = self.actions[:, 0]  # actions是compute_observations后的结果
+        predicted_gait_id = torch.floor(gait_output * 3.99).long()  # {0,1,2,3}
+
+        # 定义最优步态（基于速度，严格对齐 GAIT_TEMPLATES 的ID）
+        # GAIT_TEMPLATES: 0=TROT, 1=WALK, 2=BOUND, 3=PRONK
+        optimal_gait = torch.zeros_like(predicted_gait_id)
+
+        # Walk(ID=1): 低速最优
+        optimal_gait = torch.where(current_speed < 0.5,
+                                    torch.tensor(1, device=self.device),
+                                    optimal_gait)
+
+        # Trot(ID=0): 中速最优
+        optimal_gait = torch.where((current_speed >= 0.5) & (current_speed < 1.5),
+                                    torch.tensor(0, device=self.device),
+                                    optimal_gait)
+
+        # Bound(ID=2): 高速最优
+        optimal_gait = torch.where(current_speed >= 1.5,
+                                    torch.tensor(2, device=self.device),
+                                    optimal_gait)
+
+        # 匹配度
+        correct_gait = (predicted_gait_id == optimal_gait).float()
+
+        # 过渡区域容忍度（速度在阈值附近时，两种步态都可接受）
+        in_walk_trot_transition = (current_speed > 0.4) & (current_speed < 0.6)
+        in_trot_bound_transition = (current_speed > 1.4) & (current_speed < 1.6)
+        in_transition = in_walk_trot_transition | in_trot_bound_transition
+
+        # 过渡区域降低惩罚（错误选择只扣一半分）
+        reward = torch.where(in_transition,
+                             correct_gait * 1.0 + (1 - correct_gait) * 0.5,
+                             correct_gait * 1.0)
+
+        return reward
+
+    def _reward_jump_feasibility_correct(self):
+        """
+        奖励网络正确判断跳跃可行性
+        High-Level输出: actions[:, 1] ∈ [0, 1] (跳跃可行性评分)
+
+        跳跃可行条件（参考legged_robot.py:895-897）:
+        1. 速度追踪良好 (vel_reward > 0.85)
+        2. 步态相位准确 (phase_error < 0.05)
+        3. 姿态稳定 (orientation_error < 0.1)
+        4. 脚接触地面 (contact = True)
+        5. 当前模式稳定 (mode_timer > 100步)
+
+        网络应该学会：
+        - 满足所有条件 → 输出高分(接近1)
+        - 不满足条件 → 输出低分(接近0)
+        """
+        # 初始化状态跟踪变量
+        if not hasattr(self, 'jump_mode_timer'):
+            self.jump_mode_timer = torch.zeros(self.num_envs, device=self.device)
+        self.jump_mode_timer += 1
+
+        # High-Level输出的可行性评分
+        feasibility_score = self.actions[:, 1]  # [0, 1]
+
+        # === 计算真实的跳跃可行性 ===
+
+        # 1. 速度追踪良好
+        lin_vel_error = torch.sum(torch.square(
+            self.commands[:, :3] - self.base_lin_vel[:, :3]
+        ), dim=1)
+        vel_reward = torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma)
+        vel_tracking_good = vel_reward > 0.85
+
+        # 2. 步态相位准确
+        phase = self._cpg.X[:, 1, :]
+        norm_phase = (phase % (2 * torch.pi)) / (2 * torch.pi)
+        phase_diff = (norm_phase - norm_phase[:, 0:1]) % 1.0
+
+        # 获取当前步态ID（从High-Level输出）
+        gait_output = self.actions[:, 0]
+        gait_id = torch.floor(gait_output * 3.99).long()
+
+        # 步态模板
+        GAIT_TEMPLATES = torch.tensor([
+            [0.0, 0.5, 0.5, 0.0],   # Walk
+            [0, 0.5, 0.75, 0.25],   # Trot
+            [0.0, 0.0, 0.5, 0.5],   # Bound
+            [0.0, 0.0, 0.0, 0.0],   # Pronk
+        ], device=self.device)
+
+        target_phase = GAIT_TEMPLATES[gait_id]
+        phase_error = torch.min(
+            torch.abs(phase_diff - target_phase),
+            1.0 - torch.abs(phase_diff - target_phase)
+        ).mean(dim=1)
+        phase_good = phase_error < 0.05
+
+        # 3. 姿态稳定
+        orientation_error = torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+        orientation_good = orientation_error < 0.1
+
+        # 4. 脚接触地面
+        contact_good = self.contact.any(dim=1)
+
+        # 5. 当前模式稳定（在运动模式已保持足够长时间）
+        mode_stable = self.jump_mode_timer > 100
+
+        # === 综合判断 ===
+        true_feasible = (vel_tracking_good & phase_good & orientation_good &
+                         contact_good & mode_stable).float()
+
+        # 计算预测误差
+        prediction_error = torch.abs(feasibility_score - true_feasible)
+
+        # 奖励：预测越准确，奖励越高
+        reward = torch.exp(-prediction_error / 0.2)
+
+        return reward
+
+    def _reward_smooth_gait_transition(self):
+        """
+        惩罚步态频繁切换（鼓励平滑过渡）
+        """
+        # 当前步态
+        gait_output = self.actions[:, 0]
+        current_gait = torch.floor(gait_output * 3.99).long()
+
+        # 初始化上一步态记录
+        if not hasattr(self, 'last_gait'):
+            self.last_gait = current_gait.clone()
+            return torch.zeros(self.num_envs, device=self.device)
+
+        # 检测步态切换
+        gait_changed = (current_gait != self.last_gait).float()
+
+        # 返回负奖励（切换时惩罚）
+        reward = gait_changed  # 这个会被 scales 中的负权重处理
+
+        # 更新记录
+        self.last_gait = current_gait.clone()
+
         return reward

@@ -10,7 +10,7 @@ from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Log
 
 import numpy as np
 import torch
-
+import csv
 
 
 def play(args):
@@ -40,12 +40,27 @@ def play(args):
         path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'policies')
         export_policy_as_jit(ppo_runner.alg.actor_critic, path)
         print('Exported policy as jit script to: ', path)
+    camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
+    camera_lookat = np.array(env_cfg.viewer.lookat, dtype=np.float64)
+    gait_csv_path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', 'gait_contact.csv')
+    gait_file = open(gait_csv_path, 'w', newline='') if RECORD_GAIT else None
+    gait_writer = csv.writer(gait_file) if RECORD_GAIT else None
+    if RECORD_GAIT:
+        gait_writer.writerow(['Time (s)', 'FL_Fz', 'FR_Fz', 'RL_Fz', 'RR_Fz'])
     for i in range(10*int(env.max_episode_length)):
         # obs[:,10:11]=3.0
         # env.commands[:,4]=2# reset jump distance
 
         actions = policy(obs.detach())
         obs, _, rews, dones, infos = env.step(actions.detach())
+        if RECORD_GAIT:
+            fz = env.contact_forces[0, env.feet_indices, 2].cpu().tolist()
+            gait_writer.writerow([f'{i * env.dt:.4f}'] + [f'{v:.3f}' for v in fz])
+        if MOVE_CAMERA:
+            robot_pos = env.root_states[0, :3].cpu().numpy()
+            camera_position[:2] = robot_pos[:2] + np.array([-1.5, -1.5])
+            camera_lookat[:2] = robot_pos[:2]
+            env.set_camera(camera_position, camera_lookat)
         # GAIT_TEMPLATES = torch.tensor([
         #     [0.0, 0.5, 0.5, 0.0],   # TROT
         #     [0.0, 0.5, 0.0, 0.5],   # PACE
@@ -55,9 +70,14 @@ def play(args):
         #     [0, 0.6, 0.3, 0.6]  # CANTER
 
         # ], device=self.device)
+    if gait_file:
+        gait_file.close()
+        print(f'[GaitRecorder] saved → {gait_csv_path}')
+
 if __name__ == '__main__':
     EXPORT_POLICY = True
     RECORD_FRAMES = False
-    MOVE_CAMERA = False
+    MOVE_CAMERA = True
+    RECORD_GAIT  = True   # True时记录接触力到CSV，用gait_contact_plotter.py绘图
     args = get_args()
     play(args)

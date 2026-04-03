@@ -530,7 +530,9 @@ class LeggedRobot(BaseTask):
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         self.jump_sig = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
-        self._cpg = CPG_RL(time_step=self.sim_params.dt,num_envs=self.num_envs,device=self.device,rl_task_string=self.cfg.control.control_type)
+        self._cpg = CPG_RL(time_step=self.sim_params.dt,num_envs=self.num_envs,device=self.device,rl_task_string=self.cfg.control.control_type,
+                           couple=self.cfg.commands.cpg_couple,
+                           coupling_strength=self.cfg.commands.cpg_coupling_strength)
         self.frequency_high = torch.ones((self.num_envs,4), dtype=torch.float, device=self.device, requires_grad=False)*self.cfg.commands.freq_max
         self.frequency_low = torch.ones((self.num_envs,4), dtype=torch.float, device=self.device, requires_grad=False)*self.cfg.commands.freq_low
         self.max_jump_height = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -892,9 +894,9 @@ class LeggedRobot(BaseTask):
         if (loco_phase_error[ids].mean() > 0.05 or vel_reward[ids].mean()<0.8):
             print("loco_phase_error", loco_phase_error[ids].mean().item())
         # self.flag = False
-        loco_goal = (~jump_sig) & (vel_reward >0.85) & feet_in_contact & (loco_phase_error[ids].mean() < 0.05)&\
+        loco_goal = (self.cfg.commands.is_jump == 1) & (~jump_sig) & (vel_reward >0.85) & feet_in_contact & (loco_phase_error[ids].mean() < 0.05)&\
                    (self.cooldown_timer == 0) & (self.mode_timer > self.cfg.rewards.min_mode_steps) &\
-                    (self.episode_length_buf%(0.5*self.max_episode_length) > 0.25*self.max_episode_length) 
+                    (self.episode_length_buf%(0.5*self.max_episode_length) > 0.25*self.max_episode_length)
         loco_goal_count = torch.count_nonzero(loco_goal)   
         print("loco_goal_count", loco_goal_count.item()) if loco_goal_count > 0 else None
         self.jump_sig[loco_goal] = 1

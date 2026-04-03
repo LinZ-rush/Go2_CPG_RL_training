@@ -1,13 +1,47 @@
-policy_path: "../../../../resources/policies/policy_1.pt"
+# ===== Low-Level Policy (原有) =====
+#policy_path: "../../../../resources/policies/policy_1.pt"
 #policy_path: "../../../../resources/policies/policy_max_height.pt"
 #policy_path: "../../../../resources/policies/policy_higher.pt"
-#policy_path: "/home/tumi6/Repo/cpg_jump-main/deploy/resources/policies/policy_1_Jan28.pt"
+#policy_path: "../../../../resources/policies/policy_Sep25_21-35-59_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar23_18-27-08_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar24_01-09-19_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar24_12-13-18_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar24_20-26-02_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar25_17-16-38_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar26_00-34-38_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar26_10-35-55_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar26_18-00-54_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar27_01-13-17_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar28_23-21-42_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar29_13-06-23_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar30_00-15-20_.pt"
+#policy_path: "../../../../resources/policies/policy_Mar30_15-42-55_.pt"
+policy_path: "../../../../resources/policies/policy_Apr01_22-14-41_.pt"
+#policy_path: "../../../../resources/policies/policy_Apr02_11-24-14_.pt"
+#policy_path: "../../../../resources/policies/policy_Apr02_15-43-25_.pt"
+
+
+num_actions: 16
+num_obs: 68
+action_scale: 0.25
+
+# ===== High-Level Policy (新增) =====
+high_policy_path: "../../../../resources/policies/policy_high_level_16Feb.pt"
+num_high_obs: 35
+num_high_actions: 3
+
+# ===== 传感器缩放 =====
 default_angles: [0.1,0.8,-1.5,-0.1,0.8,-1.5,0.1,1.0,-1.5,-0.1,1,-1.5]
 lin_vel_scale: 2.0
 ang_vel_scale: 0.25
 dof_pos_scale: 1.0
 dof_vel_scale: 0.05
 cmd_scale: [2.0, 2.0, 0.25]
-num_actions: 16
-num_obs: 68
-action_scale: 0.25
+
+# ===== 控制频率 (与训练对齐) =====
+high_decimation: 200   # High-Level每200步执行一次 (5Hz)
+low_decimation: 10     # Low-Level每10步执行一次 (100Hz)
+
+# ===== 决策融合参数 =====
+jump_feasibility_threshold: 0.7
+enable_debug_output: true

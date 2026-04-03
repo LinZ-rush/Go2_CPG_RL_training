@@ -94,10 +94,10 @@ class ActorCritic(nn.Module):
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
 
-        # Action noise
-        # self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        # Action noise #第一阶段训练固定噪声，第二阶段恢复可学习噪声
+        # self.std = nn.Parameter(init_noise_std * torch.ones(num_actions)) 
         self.std = init_noise_std * torch.ones(num_actions,dtype=torch.float, device='cuda:0', requires_grad=False)
-
+        
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
@@ -134,7 +134,8 @@ class ActorCritic(nn.Module):
     def update_distribution(self, observations):
         mean = self.actor(observations)
         # print("mean", mean)
-        self.distribution = Normal(mean, mean*0. + self.std)
+        std_clamped = torch.clamp(self.std, min=0.01, max=1.0)  # 限制噪声范围，防止失控
+        self.distribution = Normal(mean, mean*0. + std_clamped)
 
     def act(self, observations, **kwargs):
         self.update_distribution(observations)

@@ -116,7 +116,70 @@ It's implemented as an **Extended Kalman Filter (EKF)** with a measurement model
 
 
 #本项目的source路径
- source /opt/ros/humble/setup.zsh
- source ~/Repo/cpg_jump-main/deploy/src/unitree_ros2/install/setup.zsh
- source ~/Repo/cpg_jump-main/deploy/install/setup.zsh
+conda activate go2_ros_env     
+source /opt/ros/humble/setup.zsh
+source ~/Repo/cpg_jump-main/deploy/src/unitree_ros2/install/setup.zsh
+source ~/Repo/cpg_jump-main/deploy/install/setup.zsh
 
+
+
+键盘操作提示：
+
+↑↓←→ 移动，长按加速
+Q/W/E 一键切到 Walk(0.3) / Trot(1.0) / Bound(1.8) 速度
+空格 跳跃
+S 急停
+ESC 退出
+
+原始 config.py 只读基础字段，而当前 config.py 强制读 high_policy_path。rl_policy_single.py import 的是同一个 config.py，所以当前 config.py 会读 High-Level 字段，但这没关系——go2.yaml 里有这些字段，多读不影响。rl_policy_single.py 代码内不会使用这些字段。
+
+这样就完全兼容了。重新编译后两种模式都可用：
+
+双层层级模式 (当前, 3 个终端):
+
+
+ros2 run deploy_rl_policy mujoco_simulator.py
+ros2 run deploy_rl_policy low_level_ctrl --ros-args -p is_simulation:=true
+ros2 run deploy_rl_policy rl_policy.py --is_simulation True --control keyboard
+原始单层模式 (4 个终端):
+
+
+ros2 run deploy_rl_policy mujoco_simulator.py
+ros2 run deploy_rl_policy low_level_ctrl --ros-args -p is_simulation:=true
+ros2 run joy joy_node
+ros2 run deploy_rl_policy rl_policy_single.py --is_simulation True
+
+集成分析
+两个项目对比:
+
+方面	目标项目	cpg_jump 参考
+rl_policy.py	45/270维标准MLP	68维 CPG+RL
+cpg_rl.py	无	有
+mujoco_simulator.py	有 /mujoco/force 但被注释, 无 /mujoco/vel	两者都有
+low_level_ctrl.cpp	与 cpg_jump 完全相同	同左
+base_velocity_estimator	有 (真机EKF)	无
+集成计划 (6步)
+Step 1 — 复制 cpg_rl.py 到目标项目 (无修改，安全操作)
+
+Step 2 — 创建 rl_policy_cpg.py (基于 rl_policy_single.py，改 config 路径)
+
+Step 3 — 创建 configs/go2_cpg.yaml (CPG专用配置)
+
+Step 4 — 修改 mujoco_simulator.py：
+
+取消注释 force 发布，添加坐标变换 (像 cpg_jump 那样用 site_xmat)
+新增 /mujoco/vel 发布
+时步 0.005 → 0.001 (对齐 CPG 1000Hz)
+切换 xml → go2.xml (有速度传感器)
+Step 5 — 更新 CMakeLists.txt，加入 cpg_rl.py 和 rl_policy_cpg.py
+
+Step 6 — 复制策略文件 policy_1_Jan28.pt
+
+不修改的文件: rl_policy.py, low_level_ctrl.cpp, base_velocity_estimator/, config.py
+
+
+
+读calf和thigh
+source /opt/ros/humble/setup.zsh
+source ~/Repo/cpg_jump-main/deploy/src/unitree_ros2/install/setup.zsh
+python3 ~/Repo/cpg_jump-main/deploy/src/deploy_rl_policy/scripts/thigh_calf_monitor.py

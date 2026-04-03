@@ -97,13 +97,15 @@ class LeggedRobotCfg(BaseConfig):
         heading_command = False # if true: compute ang vel command from heading error
         freq_max= 31.4
         freq_low= -3.14
-        is_jump=1
+        is_jump=0
+        cpg_couple = True          # 是否开启CPG相位耦合（防止腿间相位漂移导致弹跳步态）
+        cpg_coupling_strength = 1.0 # 耦合强度：0=关闭，0.5=软引导，1.0=标准，2.0=强制
         class ranges: #指令数据的范围
-            lin_vel_x = [0, 1.0] # min max [m/s]
+            lin_vel_x = [0, 2.0] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-1e-5, 1e-5]    # min max [rad/s]
             jump_up_height = [0.45, 0.6]  # max: 0.57
-            loc_height = 0.3
+            loc_height = 0.25 #只进行trot步态练习
             heading = [-0 ,0]
             
     class rewards:
@@ -129,11 +131,11 @@ class LeggedRobotCfg(BaseConfig):
             locomotion_distance = 0
             # feet_air_time = -1e-5
             lin_vel_z = -0.
-            action_rate = -0.
+            #action_rate = -0.
             work=-0.
             dof_vel = -0.
             dof_acc = 0
-            base_height = -0.
+            base_height = -5.0
             feet_stumble = -0.0 
             stand_still = -0.
 
@@ -141,11 +143,11 @@ class LeggedRobotCfg(BaseConfig):
         jump_goal = 50.0
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)
         height_sigma=0.1
-        jump_sigma= 0.1
+        jump_sigma= 0.1 
         soft_dof_pos_limit = 0.9 # percentage of urdf limits, values above this limit are penalized
         soft_dof_vel_limit = 1.
         soft_torque_limit = 1.
-        base_height_target = 0.3
+        base_height_target = 0.25
         max_contact_force = 100. # forces above this value are penalized
         min_mode_steps = 100    # 模式最小保持步数
         cooldown_steps = 150
@@ -161,7 +163,7 @@ class LeggedRobotCfg(BaseConfig):
         clip_actions = 100.  #截断，防止异常值损坏梯度
 
     class noise:
-        add_noise = False #True
+        add_noise = True #True
         noise_level = 1.0 # scales other values
         class noise_scales:
             dof_pos = 0.01
@@ -192,7 +194,7 @@ class LeggedRobotCfg(BaseConfig):
             rest_offset = 0.0   # [m]
             bounce_threshold_velocity = 0.5 #0.5 [m/s]
             max_depenetration_velocity = 1.0
-            max_gpu_contact_pairs = 2**23 #2**24 -> needed for 8000 envs and more
+            max_gpu_contact_pairs = 2**24 #2**24 -> needed for 8000 envs and more
             default_buffer_size_multiplier = 5
             contact_collection = 2 # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
 
@@ -226,8 +228,8 @@ class LeggedRobotCfgPPO(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 48 #24 # per iteration
-        max_iterations = 10000 #30000 # number of policy updates
+        num_steps_per_env = 24 #24 # per iteration
+        max_iterations = 5000 #30000 # number of policy updates
 
         # logging
         save_interval = 500 # check for potential saves every this many iterations

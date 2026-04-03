@@ -2,7 +2,7 @@ from .base_config import BaseConfig
 
 class JumpCfg(BaseConfig):
     class env:
-        num_envs = 8192 #2048
+        num_envs = 2048 #2048
         num_single_obs = 35
         frame_stack = 4 # number of frames stacked in the observation buffer
         num_observations = num_single_obs 
@@ -99,7 +99,7 @@ class JumpCfg(BaseConfig):
         freq_max= 40
         freq_low= -3
         class ranges:
-            lin_vel_x = [0,1] # min max [m/s]
+            lin_vel_x = [0, 2.0]  # min max [m/s] - 扩大范围以测试Bound步态
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-1e-5, 1e-5]    # min max [rad/s]
             heading = [-0 ,0]
@@ -108,16 +108,19 @@ class JumpCfg(BaseConfig):
             
     class rewards:
         class scales:
-            tracking_vel = 10 # reward for tracking the linear velocity command
-            tracking_command_phase =10
+            tracking_vel = 20  # reward for tracking the linear velocity command (提高优先级)
+            tracking_command_phase = 15  # 相位追踪权重提高
+            gait_velocity_matching = 10.0  # NEW: 步态-速度匹配奖励 (降低权重，给速度追踪让路)
+            jump_feasibility_correct = 8.0  # NEW: 跳跃可行性判断准确性奖励
+            smooth_gait_transition = -2.0   # NEW: 惩罚频繁步态切换
             # gait_matching = 10.0
             # tracking_jump_distance = 1 # reward for jumping to a target distance
             orientation_roll = -200.
-            orientation_yaw = -300.003 
+            orientation_yaw = -300.003
             collision = -1
             action_rate = -0.01
             feet_contact_forces = -0.01
-            energy = -0.001 
+            energy = -0.001
             ang_vel_x = -0.01 # reward for penalizing base angular velocity
             ang_vel_z = 0 # reward for penalizing base angular velocity
             locomotion_distance = 0
@@ -133,7 +136,7 @@ class JumpCfg(BaseConfig):
             dof_vel = -0.
             dof_acc = 0
             base_height = -0.
-            feet_stumble = -0.0 
+            feet_stumble = -0.0
             stand_still = -0.
 
         only_positive_rewards = False # if true negative total rewards are clipped at zero (avoids early termination problems)
@@ -144,6 +147,23 @@ class JumpCfg(BaseConfig):
         base_height_target = 0.3
         max_contact_force = 180. # forces above this value are penalized
         action_sigma=10
+
+        # NEW: 步态-速度映射规则（带滞后）
+        gait_speed_thresholds = {
+            'walk_to_trot': 0.6,    # Walk切换到Trot的速度阈值
+            'trot_to_walk': 0.4,    # Trot切换到Walk的速度阈值
+            'trot_to_bound': 1.6,   # Trot切换到Bound的速度阈值
+            'bound_to_trot': 1.4,   # Bound切换到Trot的速度阈值
+        }
+
+        # NEW: 跳跃条件阈值（参考legged_robot.py的触发逻辑）
+        jump_feasibility_thresholds = {
+            'vel_tracking_min': 0.85,      # 速度追踪必须>85%
+            'phase_error_max': 0.05,       # 步态相位误差<5%
+            'orientation_error_max': 0.1,  # 姿态倾斜<0.1 (约18度)
+            'min_mode_steps': 100,         # 当前模式最小保持步数
+            'cooldown_steps': 150,         # 跳跃冷却步数
+        }
 
 
     class normalization:
@@ -198,7 +218,7 @@ class JumpCfgPPO(BaseConfig):
     seed = 1
     runner_class_name = 'OnPolicyRunner'
     class policy:
-        init_noise_std = 1.0
+        init_noise_std = 0.3  # High-Level只有3维输出，噪声不能太大
         actor_hidden_dims = [512, 256, 128]
         critic_hidden_dims = [512, 256, 128]
         activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
@@ -212,20 +232,20 @@ class JumpCfgPPO(BaseConfig):
         value_loss_coef = 1.0
         use_clipped_value_loss = True
         clip_param = 0.2
-        entropy_coef = 0.01
+        entropy_coef = 0.005   # 降低entropy bonus，防止noise_std失控
         num_learning_epochs = 5
-        num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
-        learning_rate = 1.e-3 #5.e-4
-        schedule = 'adaptive' # could be adaptive, fixed
+        num_mini_batches = 4
+        learning_rate = 1.e-3
+        schedule = 'adaptive'
         gamma = 0.99
         lam = 0.95
-        desired_kl = 0.01
+        desired_kl = 0.01     # 恢复为0.01，保守更新
         max_grad_norm = 1.
 
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 12 # per iteration
+        num_steps_per_env = 24 # per iteration (12→24 更好的梯度估计)
         max_iterations = 3000 # number of policy updates
 
         wandb_project = "cpg_rl"       # 项目名称 (必须有)
@@ -236,6 +256,6 @@ class JumpCfgPPO(BaseConfig):
         run_name = ''
         # load and resume
         resume = False
-        load_run = -1 # -1 = last run
-        checkpoint = -1 # -1 = last saved model
+        load_run = 'Feb15_22-45-06_' # 指定最新训练运行 (-1 = last run, 字母排序有bug)
+        checkpoint = 3000 # -1 = last saved model
         resume_path = None # updated from load_run and chkpt

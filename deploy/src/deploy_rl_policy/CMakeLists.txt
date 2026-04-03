@@ -35,9 +35,11 @@ link_directories(src)
 add_executable(low_level_ctrl src/low_level_ctrl.cpp src/common/motor_crc.cpp)
 # add_executable(low_level_ctrl_simulation src/low_level_ctrl_simulation.cpp src/common/motor_crc.cpp)
 
-install(PROGRAMS 
+install(PROGRAMS
   scripts/rl_policy.py
+  scripts/rl_policy_single.py
   scripts/xbox_command.py
+  scripts/keyboard_command.py
   scripts/config.py
   scripts/mujoco_simulator.py
   scripts/cpg_rl.py
